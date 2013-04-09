@@ -30,6 +30,7 @@ This is the model currently used:
 Example queries
 ---------------
 Here's a few sample queries you can try out:
+
 Find all transitive dependencies of all artifacts Neo Technology has ever published:
 ```
 start group=node:groups(groupId='org.neo4j')
@@ -51,6 +52,19 @@ start group=node:groups(groupId='junit')
 match group-[:HAS_ARTIFACT]->artifact-[:HAS_VERSION]->version<-[:HAS_DEPENDENCY]-dependent
 return version.version, count(dependent) as depCount
 order by depCount desc
+```
+
+For the latest version of all artifacts, what version of JUnit do they use:
+```
+start group=node:groups('groupId:*')
+match group-[:HAS_ARTIFACT]->artifact-[:HAS_VERSION]->version
+with artifact, version
+order by version.version desc
+with artifact, head(collect(version)) as latestVersion
+match latestVersion-[:HAS_DEPENDENCY]->dependency
+where dependency.artifactId='junit'
+return artifact.artifactId, latestVersion.version, dependency.version
+order by dependency.version
 ```
 
 License
