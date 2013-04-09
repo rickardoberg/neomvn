@@ -48,13 +48,8 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.someclass.Main</mainClass>
-              <packageName>com.someclass</packageName>
+              <mainClass>com.github.rickardoberg.neomvn.Main</mainClass>
             </manifest>
-            <manifestEntries>
-              <mode>development</mode>
-              <url>${pom.url}</url>
-            </manifestEntries>
           </archive>
         </configuration>
       </plugin>
