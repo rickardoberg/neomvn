@@ -67,6 +67,20 @@ return artifact.artifactId, latestVersion.version, dependency.version
 order by dependency.version
 ```
 
+What projects' latest artifacts transitively depend on an outdated version of Neo4j:
+```
+start group=node:groups('groupId:*')
+match group-[:HAS_ARTIFACT]->artifact-[:HAS_VERSION]->version
+where group.groupId<>'org.neo4j'
+with artifact,version
+order by version.version desc
+with artifact, head(collect(version)) as latestVersion
+match latestVersion-[:HAS_DEPENDENCY*..5]->dep
+where dep.groupId='org.neo4j'
+return distinct artifact.artifactId, latestVersion.groupId, latestVersion.version, dep.artifactId, dep.version
+order by dep.version
+```
+
 License
 -------
 This library is made available under the Apache Software License 2.0.
