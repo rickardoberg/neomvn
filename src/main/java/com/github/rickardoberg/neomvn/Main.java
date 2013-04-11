@@ -4,27 +4,13 @@ import java.io.File;
 import java.io.FileFilter;
 import java.io.FilenameFilter;
 import java.io.IOException;
-import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
-import org.apache.maven.model.Repository;
-import org.apache.maven.model.building.DefaultModelBuilder;
-import org.apache.maven.model.building.DefaultModelBuilderFactory;
-import org.apache.maven.model.building.DefaultModelBuildingRequest;
-import org.apache.maven.model.building.FileModelSource;
-import org.apache.maven.model.building.ModelBuildingRequest;
-import org.apache.maven.model.building.ModelProblemCollector;
-import org.apache.maven.model.building.ModelSource;
-import org.apache.maven.model.resolution.InvalidRepositoryException;
-import org.apache.maven.model.resolution.ModelResolver;
-import org.apache.maven.model.resolution.UnresolvableModelException;
-import org.apache.maven.model.validation.ModelValidator;
 import org.neo4j.graphdb.Direction;
 import org.neo4j.graphdb.DynamicRelationshipType;
 import org.neo4j.graphdb.GraphDatabaseService;
@@ -51,8 +37,12 @@ public class Main
     private final DynamicRelationshipType has_version;
     private DynamicRelationshipType has_dependency;
 
+    private ModelResolver modelResolver;
+
     private Transaction tx;
     private int count = 0;
+
+    private List<String> failedPoms = new ArrayList<String>(  );
 
     public static void main( String[] args ) throws ParserConfigurationException, IOException, SAXException
     {
@@ -64,6 +54,8 @@ public class Main
 
     public Main(File repository) throws ParserConfigurationException, IOException, SAXException
     {
+        modelResolver = new ModelResolver( new RepositoryModelResolver(repository, "http://repo1.maven.org/maven2") );
+
         File dbPath = new File("neomvn");
         dbPath.mkdir();
 
@@ -89,9 +81,15 @@ public class Main
             logger.info( "Versions" );
             visitPoms( repository, new Visitor<Model>()
             {
-                public void accept( Model item )
+                public void accept( Model model )
                 {
-                    artifact( item );
+                    String groupId = getGroupId( model );
+                    String artifactId = model.getArtifactId();
+                    String version = getVersion( model );
+                    String name = model.getName();
+                    if (name == null)
+                        name = artifactId;
+                    artifact( groupId, artifactId, version, name);
                 }
             });
 
@@ -111,6 +109,12 @@ public class Main
         finally
         {
             graphDatabaseService.shutdown();
+        }
+
+        System.err.println( "Failed POM files" );
+        for ( String failedPom : failedPoms )
+        {
+            System.err.println( failedPom );
         }
     }
 
@@ -156,58 +160,22 @@ public class Main
 
     private void visitPom( File pomfile, Visitor<Model> visitor )
     {
-        ModelBuildingRequest req = new DefaultModelBuildingRequest();
-        req.setProcessPlugins( false );
-        req.setPomFile( pomfile );
-        req.setModelResolver( new RepositoryModelResolver(  ) );
-        req.setValidationLevel( ModelBuildingRequest.VALIDATION_LEVEL_MINIMAL );
-
-        DefaultModelBuilder builder = new DefaultModelBuilderFactory().newInstance();
-        builder.setModelValidator( new ModelValidator()
-        {
-            public void validateRawModel( Model model, ModelBuildingRequest request, ModelProblemCollector problems )
-            {
-            }
-
-            public void validateEffectiveModel( Model model, ModelBuildingRequest request, ModelProblemCollector problems )
-            {
-                try
-                {
-                    Field problemsList = problems.getClass().getDeclaredField("problems");
-                    problemsList.setAccessible( true );
-                    List<?> list = (List<?>) problemsList.get( problems );
-                    list.clear();
-
-                    Field severitiesSet = problems.getClass().getDeclaredField("severities");
-                    severitiesSet.setAccessible( true );
-                    Set<?> set = (Set<?>) severitiesSet.get( problems );
-                    set.clear();
-                }
-                catch ( Throwable e )
-                {
-                    logger.warn( "Could not clear problems", e );
-                }
-            }
-        } );
-
         try
         {
-            Model model = builder.build( req ).getEffectiveModel();
+            Model model = modelResolver.resolve( pomfile );
 
             visitor.accept( model );
         }
         catch ( Throwable e )
         {
             LoggerFactory.getLogger( getClass() ).warn( "Could not handle: " + pomfile, e );
-            throw new RuntimeException( e );
+            pomfile.delete();
+            failedPoms.add( pomfile.getAbsolutePath() );
         }
     }
 
-    private void artifact( Model model )
+    private Node artifact( String groupId, String artifactId, String version, String name )
     {
-        String groupId = getGroupId( model );
-        String artifactId = model.getArtifactId();
-        String version = getVersion( model );
         logger.info(groupId+" "+artifactId+" "+ version );
 
         Node groupIdNode = groups.get( "groupId", groupId ).getSingle();
@@ -231,11 +199,8 @@ public class Main
         versionNode.setProperty( "groupId", groupId );
         versionNode.setProperty( "artifactId", artifactId );
         versionNode.setProperty( "version", version );
-        if (model.getName() != null)
-        {
-            artifactIdNode.setProperty( "name", model.getName() );
-            versionNode.setProperty( "name", model.getName() );
-        }
+        artifactIdNode.setProperty( "name", name );
+        versionNode.setProperty( "name", name );
 
         autoIndex( versions, versionNode);
 
@@ -245,6 +210,8 @@ public class Main
         }
 
         artifactIdNode.createRelationshipTo( versionNode, has_version );
+
+        return versionNode;
     }
 
     private void autoIndex( Index<Node> versions, Node node )
@@ -283,7 +250,7 @@ public class Main
                     // Found artifact, now add dependencies
                     for ( final Dependency dependency : model.getDependencies() )
                     {
-                        visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( model, dependency ),
+                        visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( dependency ),
                                 new Visitor<Node>()
                                 {
                                     public void accept( Node dependencyVersionNode )
@@ -306,29 +273,14 @@ public class Main
         }
     }
 
-    private String getVersion( Model model, final Dependency dependency )
+    private String getVersion( final Dependency dependency )
     {
-        if (dependency.getVersion() != null)
-            return dependency.getVersion();
-
-        File parentPom = pomFor(model.getParent().getGroupId(), model.getParent().getArtifactId(), model.getParent().getVersion());
-
-        final AtomicReference<String> version = new AtomicReference<String>(  );
-        visitPom( parentPom, new Visitor<Model>()
+        String version = dependency.getVersion();
+        if (version.startsWith( "[" ))
         {
-            public void accept( Model item )
-            {
-                for ( Dependency managedDependency : item.getDependencyManagement().getDependencies() )
-                {
-                    if (dependency.getGroupId().equals( managedDependency.getGroupId() ) && dependency.getArtifactId().equals( managedDependency.getArtifactId() ))
-                    {
-                        version.set( managedDependency.getVersion() );
-                    }
-                }
-            }
-        } );
-
-        return version.get();
+            version = version.substring( 1, version.indexOf( "," ) );
+        }
+        return version;
     }
 
     private boolean visitVersion( String groupId, String artifactId, String version, Visitor<Node> visitor )
@@ -344,6 +296,12 @@ public class Main
                     return true;
                 }
             }
+
+            // Broken lookup - create fake node and mark as
+            Node fakeNode = artifact( groupId, artifactId, version, artifactId );
+            fakeNode.setProperty( "missing", true );
+            visitor.accept( fakeNode );
+
             return false;
         }
         finally
@@ -380,33 +338,4 @@ public class Main
         return value == null ? defaultValue : value;
     }
 
-    private class RepositoryModelResolver implements ModelResolver
-    {
-        public ModelSource resolveModel( String groupId, String artifactId, String versionId ) throws UnresolvableModelException
-        {
-            File pom = repository;
-            String[] groupIds = groupId.split( "\\." );
-            for ( String id : groupIds )
-            {
-                pom = new File(pom, id);
-            }
-
-            pom = new File(pom, artifactId);
-
-            pom = new File(pom, versionId );
-
-            pom = new File(pom, artifactId+"-"+versionId+".pom");
-
-            return new FileModelSource( pom );
-        }
-
-        public void addRepository( Repository repository ) throws InvalidRepositoryException
-        {
-        }
-
-        public ModelResolver newCopy()
-        {
-            return this;
-        }
-    }
 }
