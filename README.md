@@ -8,10 +8,13 @@ WARNING: if you open webadmin and use the graph visualization, whatever you do d
 
 Usage
 -----
-* Clone and build using Maven
+* Clone and build using Maven, e.g.,
+```
+mvn clean package
+```
 * Run the Main class from command line with location of Maven repo as argument. Example:
 ```
-java -jar neomvn-1.0-SNAPSHOT.jar /Users/rickard/.m2/repository
+java -jar target/neomvn-1.0-SNAPSHOT-jar-with-dependencies.jar /Users/rickard/.m2/repository
 ```
 
 * This will import and index your local Maven repository into a Neo4j graph database created under "neomvn" directory, from where the tool was invoked.
