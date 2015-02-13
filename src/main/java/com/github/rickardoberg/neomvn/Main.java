@@ -239,30 +239,28 @@ public class Main
     private void dependencies( final Model model )
     {
         Transaction tx = graphDatabaseService.beginTx();
-        try
-        {
-            visitVersion( getGroupId( model ), model.getArtifactId(), getVersion( model ), new Visitor<Node>()
-            {
-                public void accept( final Node versionNode )
+        visitVersion( getGroupId( model ), model.getArtifactId(), getVersion( model ), new Visitor<Node>()
                 {
-                    // Found artifact, now add dependencies
-                    for ( final Dependency dependency : model.getDependencies() )
-                    {
-                        visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( dependency ),
-                                new Visitor<Node>()
-                                {
-                                    public void accept( Node dependencyVersionNode )
-                                    {
-                                        Relationship dependencyRel = versionNode.createRelationshipTo(
-                                                dependencyVersionNode, has_dependency );
+            public void accept( final Node versionNode )
+            {
+                // Found artifact, now add dependencies
+                for ( final Dependency dependency : model.getDependencies() )
+                {
+                    visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( dependency ),
+                            new Visitor<Node>()
+                            {
+                        public void accept( Node dependencyVersionNode )
+                        {
+                            Relationship dependencyRel = versionNode.createRelationshipTo(
+                                    dependencyVersionNode, has_dependency );
 
-                                        dependencyRel.setProperty( "scope", withDefault(dependency.getScope(), "compile" ));
-                                        dependencyRel.setProperty( "optional", withDefault(dependency.isOptional(), Boolean.FALSE ));
-                                    }
-                                } );
-                    }
+                            dependencyRel.setProperty( "scope", withDefault(dependency.getScope(), "compile" ));
+                            dependencyRel.setProperty( "optional", withDefault(dependency.isOptional(), Boolean.FALSE ));
+                        }
+                            } );
                 }
-            } );
+            }
+                } );
 
         tx.success();
     }
