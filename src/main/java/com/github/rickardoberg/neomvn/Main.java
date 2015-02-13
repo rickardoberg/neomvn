@@ -62,25 +62,25 @@ public class Main
         FileUtils.deleteRecursively( dbPath );
 
         graphDatabaseService = new GraphDatabaseFactory().newEmbeddedDatabase( dbPath.getAbsolutePath() );
-        groups = graphDatabaseService.index().forNodes( "groups" );
-        artifacts = graphDatabaseService.index().forNodes( "artifacts" );
-        versions = graphDatabaseService.index().forNodes( "versions" );
-
-        has_artifact = DynamicRelationshipType.withName( "HAS_ARTIFACT" );
-        has_version = DynamicRelationshipType.withName( "HAS_VERSION" );
-        has_dependency = DynamicRelationshipType.withName( "HAS_DEPENDENCY" );
-
-        logger = LoggerFactory.getLogger( getClass() );
-        this.repository = repository;
-
         try
         {
             tx = graphDatabaseService.beginTx();
 
+            groups = graphDatabaseService.index().forNodes( "groups" );
+            artifacts = graphDatabaseService.index().forNodes( "artifacts" );
+            versions = graphDatabaseService.index().forNodes( "versions" );
+
+            has_artifact = DynamicRelationshipType.withName( "HAS_ARTIFACT" );
+            has_version = DynamicRelationshipType.withName( "HAS_VERSION" );
+            has_dependency = DynamicRelationshipType.withName( "HAS_DEPENDENCY" );
+
+            logger = LoggerFactory.getLogger( getClass() );
+            this.repository = repository;
+
             // Add versions
             logger.info( "Versions" );
             visitPoms( repository, new Visitor<Model>()
-            {
+                    {
                 public void accept( Model model )
                 {
                     String groupId = getGroupId( model );
@@ -91,20 +91,19 @@ public class Main
                         name = artifactId;
                     artifact( groupId, artifactId, version, name);
                 }
-            });
+                    });
 
             // Add dependencies
             logger.info( "Dependencies" );
             visitPoms( repository, new Visitor<Model>()
-            {
+                    {
                 public void accept( Model item )
                 {
                     dependencies( item );
                 }
-            } );
+                    } );
 
             tx.success();
-            tx.finish();
         }
         finally
         {
@@ -151,7 +150,6 @@ public class Main
                 if (count%1000 == 0)
                 {
                     tx.success();
-                    tx.finish();
                     tx=graphDatabaseService.beginTx();
                 }
             }
@@ -241,36 +239,30 @@ public class Main
     private void dependencies( final Model model )
     {
         Transaction tx = graphDatabaseService.beginTx();
-        try
-        {
-            visitVersion( getGroupId( model ), model.getArtifactId(), getVersion( model ), new Visitor<Node>()
-            {
-                public void accept( final Node versionNode )
+        visitVersion( getGroupId( model ), model.getArtifactId(), getVersion( model ), new Visitor<Node>()
                 {
-                    // Found artifact, now add dependencies
-                    for ( final Dependency dependency : model.getDependencies() )
-                    {
-                        visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( dependency ),
-                                new Visitor<Node>()
-                                {
-                                    public void accept( Node dependencyVersionNode )
-                                    {
-                                        Relationship dependencyRel = versionNode.createRelationshipTo(
-                                                dependencyVersionNode, has_dependency );
+            public void accept( final Node versionNode )
+            {
+                // Found artifact, now add dependencies
+                for ( final Dependency dependency : model.getDependencies() )
+                {
+                    visitVersion( dependency.getGroupId(), dependency.getArtifactId(), getVersion( dependency ),
+                            new Visitor<Node>()
+                            {
+                        public void accept( Node dependencyVersionNode )
+                        {
+                            Relationship dependencyRel = versionNode.createRelationshipTo(
+                                    dependencyVersionNode, has_dependency );
 
-                                        dependencyRel.setProperty( "scope", withDefault(dependency.getScope(), "compile" ));
-                                        dependencyRel.setProperty( "optional", withDefault(dependency.isOptional(), Boolean.FALSE ));
-                                    }
-                                } );
-                    }
+                            dependencyRel.setProperty( "scope", withDefault(dependency.getScope(), "compile" ));
+                            dependencyRel.setProperty( "optional", withDefault(dependency.isOptional(), Boolean.FALSE ));
+                        }
+                            } );
                 }
-            } );
+            }
+                } );
 
-            tx.success();
-        } finally
-        {
-            tx.finish();
-        }
+        tx.success();
     }
 
     private String getVersion( final Dependency dependency )
